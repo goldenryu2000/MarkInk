@@ -47,10 +47,10 @@ Download from the [latest release](https://github.com/goldenryu2000/MarkInk/rele
 
 | Platform | File |
 |---|---|
-| Debian, Ubuntu | `markink_<version>_amd64.deb`, then `sudo apt install ./markink_*.deb` |
+| Debian, Ubuntu | `markink_<version>_amd64.deb` (or `arm64`), then `sudo apt install ./markink_*.deb` |
 | Other Linux | `markink-<version>-linux-x86_64.tar.gz` (or `aarch64`): extract and put `markink` on your PATH |
 | macOS | `MarkInk-<version>-macos-apple-silicon.dmg` or `-intel.dmg` |
-| Windows | `MarkInk_<version>_x64-setup.exe`, or the `-portable.exe` |
+| Windows | `markink_<version>_x64-setup.exe`, or `MarkInk-<version>-windows-x86_64-portable.exe` |
 
 macOS and Windows builds are not signed yet:
 
