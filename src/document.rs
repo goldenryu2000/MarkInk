@@ -4,9 +4,12 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use iced::widget::markdown;
-use iced::widget::text_editor::{Action, Content, Cursor, Edit, Position};
+use std::sync::Arc;
+
+use iced::widget::text_editor::{Action, Content, Cursor, Edit, Motion, Position};
 
 use crate::fsio::{self, DiskSnapshot, Expect, LoadedNote, SaveError, TextFormat};
+use crate::lists::{self, OnEnter};
 use crate::undo::{Change, EditKind, UndoStack};
 
 /// Notes larger than this open with the preview disabled.
@@ -213,7 +216,7 @@ impl Document {
             let edit = if change.inserted.is_empty() {
                 Edit::Backspace
             } else {
-                Edit::Paste(std::sync::Arc::new(change.inserted.clone()))
+                Edit::Paste(Arc::new(change.inserted.clone()))
             };
             self.content.perform(Action::Edit(edit));
             change.apply(&mut self.text);
@@ -230,6 +233,77 @@ impl Document {
         }
         self.revision += 1;
         true
+    }
+
+    /// Ctrl+Backspace / Ctrl+Delete: deletes the selection, or the word before or after.
+    pub fn delete_word(&mut self, forward: bool, now: Instant) -> bool {
+        if self.content.selection().is_none() {
+            let motion = if forward {
+                Motion::WordRight
+            } else {
+                Motion::WordLeft
+            };
+            self.apply(Action::Select(motion), now);
+        }
+        let edit = if forward {
+            Edit::Delete
+        } else {
+            Edit::Backspace
+        };
+        self.apply(Action::Edit(edit), now)
+    }
+
+    /// Ctrl+L: adds or toggles a checkbox on the cursor's line.
+    pub fn toggle_task(&mut self, now: Instant) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let Position { line, column } = self.content.cursor().position;
+        let old = self
+            .content
+            .line(line)
+            .map(|l| l.text.into_owned())
+            .unwrap_or_default();
+        let new = lists::toggle_task(&old);
+        self.content.move_to(Cursor {
+            position: Position {
+                line,
+                column: old.len(),
+            },
+            selection: Some(Position { line, column: 0 }),
+        });
+        let changed = self.apply(Action::Edit(Edit::Paste(Arc::new(new.clone()))), now);
+        let column = (column + new.len()).saturating_sub(old.len());
+        self.set_cursor(line, column);
+        changed
+    }
+
+    /// Enter with Markdown list and quote continuation.
+    pub fn enter(&mut self, now: Instant) -> bool {
+        if self.read_only {
+            return false;
+        }
+        let Position { line, column } = self.content.cursor().position;
+        let text = self
+            .content
+            .line(line)
+            .map(|l| l.text.into_owned())
+            .unwrap_or_default();
+        let (before, after) = text.split_at(column.min(text.len()));
+        let action = match (self.content.selection(), lists::on_enter(before, after)) {
+            (None, OnEnter::Continue(insert)) => Edit::Paste(Arc::new(insert)),
+            (None, OnEnter::EndList) => {
+                let start = Position { line, column: 0 };
+                let end = Position { line, column };
+                self.content.move_to(Cursor {
+                    position: end,
+                    selection: Some(start),
+                });
+                Edit::Backspace
+            }
+            _ => Edit::Enter,
+        };
+        self.apply(Action::Edit(action), now)
     }
 
     /// Marks a save as in flight and returns what to write.
@@ -472,6 +546,79 @@ mod tests {
         let mut d = doc("ab\nc");
         d.set_cursor(9, 9);
         assert_eq!(d.cursor(), (1, 1));
+    }
+
+    #[test]
+    fn ctrl_backspace_deletes_previous_word() {
+        let mut d = doc("hello world");
+        d.set_cursor(0, 11);
+        assert!(d.delete_word(false, Instant::now()));
+        assert_eq!(d.text(), "hello ");
+        assert_in_sync(&d);
+        assert!(d.undo());
+        assert_eq!(d.text(), "hello world");
+    }
+
+    #[test]
+    fn ctrl_delete_deletes_next_word() {
+        let mut d = doc("hello world");
+        d.set_cursor(0, 0);
+        assert!(d.delete_word(true, Instant::now()));
+        assert!(
+            d.text().ends_with("world") && !d.text().contains("hello"),
+            "{:?}",
+            d.text()
+        );
+    }
+
+    #[test]
+    fn word_delete_with_selection_deletes_only_selection() {
+        let mut d = doc("one two three");
+        d.set_cursor(0, 8);
+        d.apply(Action::Select(Motion::Right), Instant::now());
+        assert!(d.delete_word(false, Instant::now()));
+        assert_eq!(d.text(), "one two hree");
+    }
+
+    #[test]
+    fn enter_continues_lists() {
+        let mut d = doc("- one");
+        d.set_cursor(0, 5);
+        assert!(d.enter(Instant::now()));
+        assert_eq!(d.text(), "- one\n- ");
+        assert_eq!(d.cursor(), (1, 2));
+        assert_in_sync(&d);
+    }
+
+    #[test]
+    fn enter_on_empty_item_ends_list() {
+        let mut d = doc("- one\n- ");
+        d.set_cursor(1, 2);
+        assert!(d.enter(Instant::now()));
+        assert_eq!(d.text(), "- one\n");
+        assert_eq!(d.cursor(), (1, 0));
+    }
+
+    #[test]
+    fn enter_on_plain_line_is_newline() {
+        let mut d = doc("text");
+        d.set_cursor(0, 4);
+        assert!(d.enter(Instant::now()));
+        assert_eq!(d.text(), "text\n");
+    }
+
+    #[test]
+    fn ctrl_l_toggles_checkbox_and_keeps_cursor() {
+        let mut d = doc("milk\neggs");
+        d.set_cursor(1, 2);
+        assert!(d.toggle_task(Instant::now()));
+        assert_eq!(d.text(), "milk\n- [ ] eggs");
+        assert_eq!(d.cursor(), (1, 8));
+        assert!(d.toggle_task(Instant::now()));
+        assert_eq!(d.text(), "milk\n- [x] eggs");
+        assert_in_sync(&d);
+        assert!(d.undo());
+        assert_eq!(d.text(), "milk\n- [ ] eggs");
     }
 
     #[test]

@@ -730,3 +730,29 @@ fn executable_local_files_are_not_opened() {
     assert!(!super::preview::safe_to_open(&script));
     assert!(super::preview::safe_to_open(&image));
 }
+
+use crate::shortcuts::EditorKey;
+
+#[test]
+fn editor_keys_edit_the_document() {
+    let mut s = state();
+    let a = load(&mut s, "a.md", "- one");
+    s.tabs.get_mut(a).unwrap().set_cursor(0, 5);
+    let _ = s.update(Message::EditorKey(a, EditorKey::Enter));
+    assert_eq!(text_of(&s, a), "- one\n- ");
+    let _ = s.update(Message::EditorKey(a, EditorKey::DeleteWordBack));
+    assert!(doc(&s, a).text().len() < "- one\n- ".len());
+    assert!(doc(&s, a).is_dirty());
+}
+
+#[test]
+fn help_toggles_and_escape_closes_it() {
+    let mut s = state();
+    let _ = s.update(Message::Shortcut(Command::Help));
+    assert!(s.help_visible);
+    let _ = s.update(Message::Shortcut(Command::Help));
+    assert!(!s.help_visible);
+    let _ = s.update(Message::Shortcut(Command::Help));
+    let _ = s.update(Message::Shortcut(Command::Escape));
+    assert!(!s.help_visible);
+}

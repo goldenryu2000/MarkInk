@@ -20,7 +20,7 @@ use crate::cli::Launch;
 use crate::document::DocId;
 use crate::fsio::{self, DiskSnapshot, LoadedNote, ReadError, SaveError};
 use crate::quick_open::QuickOpen;
-use crate::shortcuts::{self, Command};
+use crate::shortcuts::{self, Command, EditorKey};
 use crate::tabs::Tabs;
 use crate::watcher::{self, FsChange};
 use crate::workspace::{self, Entry, Tree};
@@ -60,6 +60,7 @@ pub struct State {
     prompt: Option<Prompt>,
     session_path: Option<PathBuf>,
     launch_open: Option<PathBuf>,
+    help_visible: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +71,7 @@ pub enum Message {
     ActivateTab(DocId),
     CloseTab(DocId),
     Edit(DocId, text_editor::Action),
+    EditorKey(DocId, EditorKey),
     Key(keyboard::Event),
     Shortcut(Command),
     DismissNotice,
@@ -123,6 +125,7 @@ impl State {
             prompt: None,
             session_path: None,
             launch_open: None,
+            help_visible: false,
         }
     }
 
@@ -169,6 +172,7 @@ impl State {
             Message::ActivateTab(id) => self.activate(id),
             Message::CloseTab(id) => self.close_tab(id),
             Message::Edit(id, action) => self.edit(id, action),
+            Message::EditorKey(id, key) => self.editor_key(id, key),
             Message::Key(event) => self.on_key(event),
             Message::Shortcut(command) => self.command(command),
             Message::DismissNotice => {
@@ -275,10 +279,17 @@ impl State {
                 self.notice = None;
                 if self.palette.is_some() {
                     self.close_palette()
+                } else if self.help_visible {
+                    self.help_visible = false;
+                    Task::none()
                 } else {
                     self.prompt = None;
                     Task::none()
                 }
+            }
+            Command::Help => {
+                self.help_visible = !self.help_visible;
+                Task::none()
             }
             Command::TogglePreview => self.toggle_preview(),
             Command::QuickOpen => self.open_quick_open(),

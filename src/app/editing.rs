@@ -11,6 +11,7 @@ use super::{EDITOR_ID, Message, State, blocking, delayed, list_dir, load_note, r
 use crate::autosave::{AUTOSAVE_DELAY, retry_delay};
 use crate::document::{DocId, DocStatus, Document};
 use crate::fsio::{DiskSnapshot, LoadedNote, ReadError, SaveError};
+use crate::shortcuts::EditorKey;
 use crate::watcher::{self, ExternalAction, FsChange};
 
 impl State {
@@ -106,6 +107,30 @@ impl State {
             .tabs
             .get_mut(id)
             .is_some_and(|doc| doc.apply(action, Instant::now()));
+        if changed {
+            self.after_change(id)
+        } else {
+            Task::none()
+        }
+    }
+
+    pub(super) fn editor_key(&mut self, id: DocId, key: EditorKey) -> Task<Message> {
+        let Some(doc) = self.tabs.get_mut(id) else {
+            return Task::none();
+        };
+        let now = Instant::now();
+        let changed = match key {
+            EditorKey::DeleteWordBack => doc.delete_word(false, now),
+            EditorKey::DeleteWordForward => doc.delete_word(true, now),
+            EditorKey::Enter => doc.enter(now),
+            EditorKey::Indent => {
+                doc.apply(text_editor::Action::Edit(text_editor::Edit::Indent), now)
+            }
+            EditorKey::Unindent => {
+                doc.apply(text_editor::Action::Edit(text_editor::Edit::Unindent), now)
+            }
+            EditorKey::ToggleTask => doc.toggle_task(now),
+        };
         if changed {
             self.after_change(id)
         } else {

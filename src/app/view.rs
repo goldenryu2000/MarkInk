@@ -3,11 +3,10 @@
 use std::path::Path;
 
 use iced::highlighter;
-use iced::keyboard::{self, key::Named};
-use iced::widget::text_editor::{self, Action, Binding, Edit, KeyPress};
+use iced::widget::text_editor::{self, Binding, KeyPress};
 use iced::widget::{
     Column, button, checkbox, column, container, markdown, mouse_area, opaque, row, rule,
-    scrollable, space, stack, text, text_input,
+    scrollable, space, stack, text, text_input, tooltip,
 };
 use iced::{Center, Color, Element, Fill, Font, Padding, Theme};
 
@@ -28,6 +27,8 @@ impl State {
     pub(super) fn view(&self) -> Element<'_, Message> {
         let overlay = if self.confirm_quit {
             Some(quit_dialog())
+        } else if self.help_visible {
+            Some(help_dialog())
         } else {
             self.palette.as_ref().map(|p| palette_view(p, &self.root))
         };
@@ -55,17 +56,24 @@ impl State {
     }
 
     fn sidebar(&self) -> Element<'_, Message> {
-        let action = |label, message| {
-            button(text(label).size(11))
+        let action = |label, hint: &str, message| {
+            let button = button(text(label).size(11))
                 .on_press(message)
                 .padding([2, 6])
-                .style(button::text)
+                .style(button::text);
+            with_hint(button, shortcuts::hint(hint))
         };
         let header = row![
-            action("+ Note", Message::Shortcut(Command::NewNote)),
-            action("+ Folder", Message::Shortcut(Command::NewFolder)),
-            action("Rename", Message::Shortcut(Command::Rename)),
-            action("Trash", Message::TrashSelected),
+            action("+ Note", "New note", Message::Shortcut(Command::NewNote)),
+            action(
+                "+ Folder",
+                "New folder",
+                Message::Shortcut(Command::NewFolder)
+            ),
+            action("Rename", "Rename", Message::Shortcut(Command::Rename)),
+            action("Trash", "Move to trash", Message::TrashSelected),
+            space::horizontal(),
+            action("?", "Shortcuts", Message::Shortcut(Command::Help)),
         ]
         .spacing(2);
         let selected = self.tree.selected.as_deref();
@@ -110,9 +118,12 @@ impl State {
     fn editor_area(&self) -> Element<'_, Message> {
         match self.tabs.active() {
             Some(doc) => self.document_view(doc),
-            None => container(text("Open a note from the sidebar or press Ctrl+P").size(UI_TEXT))
-                .center(Fill)
-                .into(),
+            None => {
+                let intro = text("Open a note from the sidebar, or:").size(UI_TEXT);
+                container(column![intro, shortcut_table()].spacing(12))
+                    .center(Fill)
+                    .into()
+            }
         }
     }
 }
@@ -160,22 +171,16 @@ fn editor(doc: &Document, highlight: highlighter::Theme) -> Element<'_, Message>
         .into()
 }
 
-/// Sends app shortcuts out of the focused editor; Tab indents.
+/// Routes app shortcuts and extra editing keys out of the focused editor.
 fn editor_binding(id: DocId) -> impl Fn(KeyPress) -> Option<Binding<Message>> {
     move |press| {
         if !matches!(press.status, text_editor::Status::Focused { .. }) {
             return Binding::from_key_press(press);
         }
-        let plain = !press.modifiers.command() && !press.modifiers.alt();
-        if plain && press.key == keyboard::Key::Named(Named::Tab) {
-            let edit = if press.modifiers.shift() {
-                Edit::Unindent
-            } else {
-                Edit::Indent
-            };
-            return Some(Binding::Custom(Message::Edit(id, Action::Edit(edit))));
-        }
         let latin = press.key.to_latin(press.physical_key);
+        if let Some(key) = shortcuts::editor_key(&press.key, latin, press.modifiers) {
+            return Some(Binding::Custom(Message::EditorKey(id, key)));
+        }
         match shortcuts::command_for(&press.key, latin, press.modifiers) {
             Some(command) if command.from_editor() => {
                 Some(Binding::Custom(Message::Shortcut(command)))
@@ -187,10 +192,13 @@ fn editor_binding(id: DocId) -> impl Fn(KeyPress) -> Option<Binding<Message>> {
 
 fn tab(doc: &Document, active: bool) -> Element<'_, Message> {
     let label = format!("{}{}", doc.title(), status_suffix(doc));
-    let close = button(text("×").size(UI_TEXT))
-        .on_press(Message::CloseTab(doc.id()))
-        .padding([0, 4])
-        .style(button::text);
+    let close = with_hint(
+        button(text("×").size(UI_TEXT))
+            .on_press(Message::CloseTab(doc.id()))
+            .padding([0, 4])
+            .style(button::text),
+        shortcuts::hint("Close tab"),
+    );
     button(
         row![text(label).size(UI_TEXT), close]
             .spacing(6)
@@ -436,4 +444,45 @@ fn palette_frame(content: Column<'_, Message>) -> Element<'_, Message> {
         .align_x(Center)
         .padding(Padding::ZERO.top(60));
     mouse_area(placed).on_press(Message::ClosePalette).into()
+}
+
+/// Wraps `content` with a hover tooltip.
+fn with_hint<'a>(content: impl Into<Element<'a, Message>>, hint: String) -> Element<'a, Message> {
+    let label = container(text(hint).size(11))
+        .padding([3, 6])
+        .style(container::bordered_box);
+    tooltip(content, label, tooltip::Position::Bottom)
+        .gap(4)
+        .into()
+}
+
+/// Two-column list of every shortcut.
+fn shortcut_table<'a>() -> Element<'a, Message> {
+    let rows = shortcuts::HELP.iter().map(|(action, keys)| {
+        row![
+            text(*action).size(UI_TEXT).width(220),
+            text(*keys).size(UI_TEXT).font(Font::MONOSPACE),
+        ]
+        .into()
+    });
+    column(rows).spacing(4).into()
+}
+
+fn help_dialog<'a>() -> Element<'a, Message> {
+    let close = button(text("Close"))
+        .on_press(Message::Shortcut(Command::Help))
+        .style(button::secondary);
+    let dialog = column![
+        text("Shortcuts").size(EDITOR_TEXT),
+        shortcut_table(),
+        text("Enter continues lists and quotes; Enter on an empty item ends the list.").size(11),
+        row![space::horizontal(), close],
+    ]
+    .spacing(12);
+    modal(
+        container(dialog)
+            .padding(20)
+            .max_width(520)
+            .style(container::bordered_box),
+    )
 }
