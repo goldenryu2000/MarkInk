@@ -11,10 +11,43 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{DebounceEventResult, Debouncer, RecommendedCache, new_debouncer};
 
 use crate::fsio::DiskSnapshot;
+use crate::workspace;
 
 const DEBOUNCE: Duration = Duration::from_millis(100);
+/// inotify needs one watch per folder, so on Linux we watch only folders the explorer shows.
+/// macOS and Windows watch a whole tree with one handle.
+const PER_FOLDER: bool = cfg!(target_os = "linux");
 
-pub type Handle = Debouncer<RecommendedWatcher, RecommendedCache>;
+/// A running watch on the notes folder. Dropping it stops watching.
+pub struct Watcher {
+    debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
+    root: PathBuf,
+}
+
+impl Watcher {
+    /// Starts watching folders that appeared in `changes`.
+    pub fn watch_new_dirs(&mut self, changes: &[FsChange]) {
+        if !PER_FOLDER {
+            return;
+        }
+        for change in changes {
+            let (FsChange::Created(path) | FsChange::Renamed { to: path, .. }) = change else {
+                continue;
+            };
+            if path.is_dir() && is_relevant(&self.root, path) && workspace::is_visible_dir(path) {
+                for dir in workspace::walk_dirs(path) {
+                    self.watch_one(&dir);
+                }
+            }
+        }
+    }
+
+    fn watch_one(&mut self, dir: &Path) {
+        if let Err(err) = self.debouncer.watch(dir, RecursiveMode::NonRecursive) {
+            tracing::warn!(dir = %dir.display(), %err, "cannot watch folder");
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FsChange {
@@ -74,11 +107,11 @@ pub fn changes_from_event(root: &Path, event: &Event) -> Vec<FsChange> {
     }
 }
 
-/// Starts watching `root` recursively. Dropping the handle stops it.
+/// Starts watching `root`. Dropping the watcher stops it.
 pub fn start(
     root: PathBuf,
     mut on_changes: impl FnMut(Vec<FsChange>) + Send + 'static,
-) -> notify::Result<Handle> {
+) -> notify::Result<Watcher> {
     let watch_root = root.clone();
     let mut debouncer =
         new_debouncer(
@@ -101,8 +134,22 @@ pub fn start(
                 }
             },
         )?;
-    debouncer.watch(&watch_root, RecursiveMode::Recursive)?;
-    Ok(debouncer)
+    if !PER_FOLDER {
+        debouncer.watch(&watch_root, RecursiveMode::Recursive)?;
+        return Ok(Watcher {
+            debouncer,
+            root: watch_root,
+        });
+    }
+    debouncer.watch(&watch_root, RecursiveMode::NonRecursive)?;
+    let mut watcher = Watcher {
+        debouncer,
+        root: watch_root.clone(),
+    };
+    for dir in workspace::walk_dirs(&watch_root).iter().skip(1) {
+        watcher.watch_one(dir);
+    }
+    Ok(watcher)
 }
 
 pub fn subscription(root: PathBuf) -> Subscription<Vec<FsChange>> {
@@ -114,7 +161,7 @@ fn stream(root: &PathBuf) -> impl Stream<Item = Vec<FsChange>> + use<> {
     let root = root.clone();
     iced::stream::channel(16, async move |mut output: mpsc::Sender<Vec<FsChange>>| {
         let (tx, mut rx) = mpsc::unbounded();
-        let _handle = match start(root, move |changes| {
+        let mut watcher = match start(root, move |changes| {
             let _ = tx.unbounded_send(changes);
         }) {
             Ok(handle) => handle,
@@ -124,6 +171,7 @@ fn stream(root: &PathBuf) -> impl Stream<Item = Vec<FsChange>> + use<> {
             }
         };
         while let Some(changes) = rx.next().await {
+            watcher.watch_new_dirs(&changes);
             if output.send(changes).await.is_err() {
                 break;
             }
@@ -230,6 +278,80 @@ mod tests {
         assert_eq!(decide(false, a, Some(b)), ExternalAction::Reload);
         assert_eq!(decide(true, a, Some(b)), ExternalAction::Conflict);
         assert_eq!(decide(false, a, None), ExternalAction::Deleted);
+    }
+
+    /// Collects changed paths until `until` shows up, then for a short grace period.
+    fn collect_until(rx: &std_mpsc::Receiver<Vec<FsChange>>, until: &Path) -> Vec<PathBuf> {
+        let mut seen = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut found = None;
+        while std::time::Instant::now() < deadline {
+            let limit = found.unwrap_or(deadline);
+            let wait = limit.saturating_duration_since(std::time::Instant::now());
+            let Ok(batch) = rx.recv_timeout(wait) else {
+                break;
+            };
+            for change in &batch {
+                seen.extend(change.paths().into_iter().map(Path::to_path_buf));
+            }
+            if found.is_none() && seen.iter().any(|p| p == until) {
+                found = Some(std::time::Instant::now() + Duration::from_millis(500));
+            }
+        }
+        seen
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn skips_gitignored_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        fs::write(root.join(".gitignore"), "node_modules/\n").unwrap();
+        fs::create_dir(root.join("node_modules")).unwrap();
+        let (tx, rx) = std_mpsc::channel();
+        let _watcher = start(root.clone(), move |c| tx.send(c).unwrap()).unwrap();
+        fs::write(root.join("node_modules/x.md"), "x").unwrap();
+        fs::write(root.join("a.md"), "a").unwrap();
+        let seen = collect_until(&rx, &root.join("a.md"));
+        assert!(seen.contains(&root.join("a.md")));
+        assert!(
+            !seen
+                .iter()
+                .any(|p| p.starts_with(root.join("node_modules"))),
+            "{seen:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn unreadable_folder_does_not_disable_watching() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let locked = root.join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::create_dir(locked.join("inner")).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let (tx, rx) = std_mpsc::channel();
+        let watcher = start(root.clone(), move |c| tx.send(c).unwrap());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let _watcher = watcher.expect("watching starts despite an unreadable folder");
+        fs::write(root.join("a.md"), "a").unwrap();
+        assert!(collect_until(&rx, &root.join("a.md")).contains(&root.join("a.md")));
+    }
+
+    #[test]
+    fn watches_folders_created_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let (tx, rx) = std_mpsc::channel();
+        let mut watcher = start(root.clone(), move |c| tx.send(c).unwrap()).unwrap();
+        fs::create_dir(root.join("new")).unwrap();
+        let first = rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        watcher.watch_new_dirs(&first);
+        fs::write(root.join("new/b.md"), "b").unwrap();
+        let seen = collect_until(&rx, &root.join("new/b.md"));
+        assert!(seen.contains(&root.join("new/b.md")), "{seen:?}");
     }
 
     #[test]

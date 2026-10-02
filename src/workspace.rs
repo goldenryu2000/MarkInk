@@ -91,6 +91,28 @@ pub fn walk_notes(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// `root` and the folders under it that the explorer shows (not hidden, ignored or symlinked).
+pub fn walk_dirs(root: &Path) -> Vec<PathBuf> {
+    walker(root)
+        .build()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_some_and(|t| t.is_dir()))
+        .map(ignore::DirEntry::into_path)
+        .collect()
+}
+
+/// Whether the explorer would show `dir` inside its parent.
+pub fn is_visible_dir(dir: &Path) -> bool {
+    let Some(parent) = dir.parent() else {
+        return false;
+    };
+    walker(parent)
+        .max_depth(Some(1))
+        .build()
+        .filter_map(Result::ok)
+        .any(|e| e.depth() == 1 && e.path() == dir && e.file_type().is_some_and(|t| t.is_dir()))
+}
+
 pub struct Row<'a> {
     pub depth: usize,
     pub entry: &'a Entry,

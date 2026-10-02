@@ -810,3 +810,54 @@ fn windows_executables_are_not_opened() {
     std::fs::write(&image, "png").unwrap();
     assert!(super::preview::safe_to_open(&image));
 }
+
+#[test]
+fn session_saves_run_one_at_a_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = state();
+    s.session_path = Some(dir.path().join("session.json"));
+    let _ = s.save_session();
+    assert!(s.session_save_in_flight);
+    let _ = s.save_session();
+    assert!(s.session_save_pending);
+    let _ = s.update(Message::SessionSaved(Ok(())));
+    assert!(
+        !s.session_save_pending && s.session_save_in_flight,
+        "queued save starts"
+    );
+    let _ = s.update(Message::SessionSaved(Ok(())));
+    assert!(!s.session_save_in_flight);
+}
+
+#[test]
+fn folder_rename_rechecks_notes_inside() {
+    let mut s = state();
+    let a = load(&mut s, "dir/a.md", "x");
+    s.tabs.get_mut(a).unwrap().saving = true;
+    let change = FsChange::Renamed {
+        from: "/notes/dir".into(),
+        to: "/notes/other".into(),
+    };
+    let _ = s.update(Message::FsChanges(vec![change]));
+    assert_eq!(doc(&s, a).path(), Path::new("/notes/other/a.md"));
+    assert!(doc(&s, a).recheck_after_save, "moved note is re-checked");
+}
+
+use super::view::visible_range;
+
+#[test]
+fn sidebar_draws_only_visible_rows() {
+    // 20 rows fit in 440px; 5 extra rows above and below.
+    assert_eq!(visible_range(1000, 0.0, 440.0, 22.0), 0..25);
+    assert_eq!(visible_range(1000, 2200.0, 440.0, 22.0), 95..125);
+    assert_eq!(visible_range(1000, 1e9, 440.0, 22.0), 970..1000);
+    assert_eq!(visible_range(5, 0.0, 440.0, 22.0), 0..5);
+    assert_eq!(visible_range(0, 300.0, 440.0, 22.0), 0..0);
+}
+
+#[test]
+fn sidebar_scroll_is_tracked() {
+    let mut s = state();
+    let _ = s.update(Message::SidebarScrolled(330.0));
+    assert_eq!(s.sidebar_offset, 330.0);
+}

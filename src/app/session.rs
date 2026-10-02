@@ -119,15 +119,32 @@ impl State {
     }
 
     /// Writes the session in the background.
-    pub(super) fn save_session(&self) -> Task<Message> {
+    /// Saves in the background, one save at a time; a request during a save is queued.
+    pub(super) fn save_session(&mut self) -> Task<Message> {
         let Some(path) = self.session_path.clone() else {
             return Task::none();
         };
+        if self.session_save_in_flight {
+            self.session_save_pending = true;
+            return Task::none();
+        }
+        self.session_save_in_flight = true;
         let session = self.capture_session();
         Task::perform(
             blocking(move || session::save(&path, &session).map_err(|e| e.to_string())),
             Message::SessionSaved,
         )
+    }
+
+    pub(super) fn session_saved(&mut self, result: Result<(), String>) -> Task<Message> {
+        if let Err(err) = result {
+            tracing::warn!(%err, "cannot save session");
+        }
+        self.session_save_in_flight = false;
+        if std::mem::take(&mut self.session_save_pending) {
+            return self.save_session();
+        }
+        Task::none()
     }
 
     /// Writes the session synchronously; used on exit.
