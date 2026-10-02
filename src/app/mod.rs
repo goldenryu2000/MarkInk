@@ -35,6 +35,22 @@ const EDITOR_LINE_HEIGHT: f32 = 15.0 * 1.3;
 /// Vertical space taken by the tab bar and editor padding.
 const EDITOR_CHROME: f32 = 60.0;
 
+fn window_settings() -> window::Settings {
+    let icon =
+        window::icon::from_rgba(include_bytes!("../../assets/icon-64.rgba").to_vec(), 64, 64);
+    window::Settings {
+        size: iced::Size::new(1200.0, 800.0),
+        icon: icon.ok(),
+        exit_on_close_request: false,
+        #[cfg(target_os = "linux")]
+        platform_specific: window::settings::PlatformSpecific {
+            application_id: "markink".into(),
+            ..Default::default()
+        },
+        ..window::Settings::default()
+    }
+}
+
 pub fn run(launch: Launch) -> iced::Result {
     iced::application(
         move || State::boot(launch.clone()),
@@ -44,8 +60,7 @@ pub fn run(launch: Launch) -> iced::Result {
     .title(State::title)
     .subscription(State::subscription)
     .theme(State::theme)
-    .exit_on_close_request(false)
-    .window_size((1200.0, 800.0))
+    .window(window_settings())
     .run()
 }
 

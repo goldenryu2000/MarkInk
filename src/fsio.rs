@@ -194,7 +194,7 @@ pub fn save_note(
 /// Writes through a temp file and rename, so readers never see a partial file.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let target = match fs::symlink_metadata(path) {
-        Ok(meta) if meta.file_type().is_symlink() => fs::canonicalize(path)?,
+        Ok(meta) if meta.file_type().is_symlink() => dunce::canonicalize(path)?,
         _ => path.to_path_buf(),
     };
     let dir = target
@@ -214,7 +214,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
         }
         file.sync_all()?;
         fs::rename(&tmp, &target)?;
-        File::open(dir)?.sync_all()
+        // Persist the rename. Windows cannot open directories as files.
+        #[cfg(unix)]
+        File::open(dir)?.sync_all()?;
+        Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
@@ -226,6 +229,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -294,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn detects_read_only() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ro.md");
@@ -378,6 +383,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn keeps_permissions() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.md");
@@ -389,6 +395,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn follows_symlinks() {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("real.md");
@@ -406,6 +413,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn failed_write_keeps_original() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.md");

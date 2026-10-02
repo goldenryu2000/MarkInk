@@ -719,6 +719,7 @@ fn links_only_open_safe_targets() {
 }
 
 #[test]
+#[cfg(unix)]
 fn executable_local_files_are_not_opened() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
@@ -789,4 +790,18 @@ fn opened_window_size_sets_visible_lines() {
     };
     let _ = s.update(Message::Window(opened));
     assert!(s.visible_lines() < tall);
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_executables_are_not_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["run.exe", "run.BAT", "x.ps1", "s.lnk"] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "x").unwrap();
+        assert!(!super::preview::safe_to_open(&path), "{name}");
+    }
+    let image = dir.path().join("pic.png");
+    std::fs::write(&image, "png").unwrap();
+    assert!(super::preview::safe_to_open(&image));
 }

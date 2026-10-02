@@ -42,10 +42,25 @@ pub const HELP: &[(&str, &str)] = &[
     ("Shortcuts", "F1"),
 ];
 
+/// `HELP` with keys as written on this platform: Cmd and Option on macOS.
+pub fn help() -> Vec<(&'static str, String)> {
+    HELP.iter().map(|(a, k)| (*a, platform_keys(k))).collect()
+}
+
+fn platform_keys(keys: &str) -> String {
+    if !cfg!(target_os = "macos") || keys.starts_with("Ctrl+Tab") {
+        return keys.to_owned();
+    }
+    if keys.contains("Backspace") || keys.contains("Left") {
+        return keys.replace("Ctrl+", "Option+");
+    }
+    keys.replace("Ctrl+", "Cmd+")
+}
+
 /// Display hint for a command, e.g. `"New note (Ctrl+N)"`.
 pub fn hint(action: &str) -> String {
     match HELP.iter().find(|(a, _)| *a == action) {
-        Some((_, keys)) => format!("{action} ({keys})"),
+        Some((_, keys)) => format!("{action} ({})", platform_keys(keys)),
         None => action.to_owned(),
     }
 }
@@ -71,13 +86,18 @@ pub enum EditorKey {
 
 /// Maps a key press in the focused editor to an editing action.
 pub fn editor_key(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Option<EditorKey> {
+    // Word jumps use Ctrl, or Option on macOS.
+    let word = modifiers.jump() && (cfg!(target_os = "macos") || !modifiers.alt());
+    match key {
+        Key::Named(Named::Backspace) if word => return Some(EditorKey::DeleteWordBack),
+        Key::Named(Named::Delete) if word => return Some(EditorKey::DeleteWordForward),
+        _ => {}
+    }
     if modifiers.alt() {
         return None;
     }
     let ctrl = modifiers.command();
     match key {
-        Key::Named(Named::Backspace) if ctrl => Some(EditorKey::DeleteWordBack),
-        Key::Named(Named::Delete) if ctrl => Some(EditorKey::DeleteWordForward),
         Key::Named(Named::Tab) if !ctrl => Some(if modifiers.shift() {
             EditorKey::Unindent
         } else {
@@ -92,9 +112,11 @@ pub fn editor_key(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Optio
 /// Maps a key press to a command. `latin` is the layout-independent letter.
 pub fn command_for(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Option<Command> {
     if let Key::Named(named) = key {
+        // Tabs cycle with Ctrl on every platform; Cmd+Tab is the macOS app switcher.
+        let tab_modifier = modifiers.control();
         return match (named, modifiers.command(), modifiers.shift()) {
-            (Named::Tab, true, false) => Some(Command::NextTab),
-            (Named::Tab, true, true) => Some(Command::PrevTab),
+            (Named::Tab, _, false) if tab_modifier => Some(Command::NextTab),
+            (Named::Tab, _, true) if tab_modifier => Some(Command::PrevTab),
             (Named::F2, false, _) => Some(Command::Rename),
             (Named::F1, false, _) => Some(Command::Help),
             (Named::Escape, false, _) => Some(Command::Escape),
@@ -278,6 +300,44 @@ mod tests {
             let row = format!("| {action} | {keys} |");
             assert!(readme.contains(&row), "README is missing: {row}");
         }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn help_uses_reference_keys() {
+        let expected: Vec<_> = HELP.iter().map(|(a, k)| (*a, k.to_string())).collect();
+        assert_eq!(help(), expected);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_help_shows_cmd_and_option() {
+        let help = help();
+        assert!(help.contains(&("Quick open", "Cmd+P".to_string())));
+        assert!(help.contains(&(
+            "Delete word",
+            "Option+Backspace / Option+Delete".to_string()
+        )));
+        assert!(help.contains(&(
+            "Next / previous tab",
+            "Ctrl+Tab / Ctrl+Shift+Tab".to_string()
+        )));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_uses_option_for_words_and_ctrl_for_tabs() {
+        let backspace = Key::Named(Named::Backspace);
+        assert_eq!(
+            editor_key(&backspace, None, Modifiers::ALT),
+            Some(EditorKey::DeleteWordBack)
+        );
+        let tab = Key::Named(Named::Tab);
+        assert_eq!(
+            command_for(&tab, None, Modifiers::CTRL),
+            Some(Command::NextTab)
+        );
+        assert_eq!(command_for(&tab, None, Modifiers::LOGO), None);
     }
 
     #[test]

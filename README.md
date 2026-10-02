@@ -41,10 +41,28 @@ Enter continues bullet, numbered, task and quote lines. Enter on an empty item e
 
 Logs: `~/.local/state/markink/markink.log` (`MARKINK_LOG=debug` for more).
 
-## Build
+## Install
 
-    cargo build --release
-    ./target/release/markink ~/notes
+Download from the [latest release](https://github.com/goldenryu2000/MarkInk/releases/latest).
+
+| Platform | File |
+|---|---|
+| Debian, Ubuntu | `markink_<version>_amd64.deb`, then `sudo apt install ./markink_*.deb` |
+| Other Linux | `markink-<version>-linux-x86_64.tar.gz` (or `aarch64`): extract and put `markink` on your PATH |
+| macOS | `MarkInk-<version>-macos-apple-silicon.dmg` or `-intel.dmg` |
+| Windows | `MarkInk_<version>_x64-setup.exe`, or the `-portable.exe` |
+
+macOS and Windows builds are not signed yet:
+
+- macOS: open MarkInk once, then go to System Settings > Privacy & Security and click Open Anyway.
+- Windows: on the SmartScreen prompt, choose More info > Run anyway.
+
+On macOS, use Cmd where this README says Ctrl, and Option for word jumps and deletes. Switching tabs stays on Ctrl+Tab.
+
+## Build from source
+
+    cargo install --git https://github.com/goldenryu2000/MarkInk
+    markink ~/notes
 
 ## License
 

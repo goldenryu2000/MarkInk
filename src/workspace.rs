@@ -298,6 +298,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn symlinked_notes_kept_and_folders_skipped() {
         let dir = setup();
         std::os::unix::fs::symlink(dir.path().join("b.md"), dir.path().join("link.md")).unwrap();

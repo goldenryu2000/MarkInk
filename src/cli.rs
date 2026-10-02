@@ -23,8 +23,7 @@ impl Cli {
     /// Resolves the workspace. A note path opens its parent folder plus the note.
     pub fn launch(&self, cwd: &Path) -> Result<Launch, String> {
         let path = cwd.join(self.path.as_deref().unwrap_or(Path::new(".")));
-        let path = path
-            .canonicalize()
+        let path = dunce::canonicalize(&path)
             .map_err(|e| format!("cannot open {}: {e}", path.display()))?;
         if path.is_dir() {
             return Ok(Launch {
@@ -57,7 +56,7 @@ mod tests {
     fn defaults_to_cwd() {
         let dir = tempfile::tempdir().unwrap();
         let launch = cli(None).launch(dir.path()).unwrap();
-        assert_eq!(launch.root, dir.path().canonicalize().unwrap());
+        assert_eq!(launch.root, dunce::canonicalize(dir.path()).unwrap());
         assert_eq!(launch.open, None);
     }
 
@@ -68,7 +67,7 @@ mod tests {
         let launch = cli(Some("notes")).launch(dir.path()).unwrap();
         assert_eq!(
             launch.root,
-            dir.path().join("notes").canonicalize().unwrap()
+            dunce::canonicalize(dir.path().join("notes")).unwrap()
         );
     }
 
@@ -77,7 +76,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("a.md"), "x").unwrap();
         let launch = cli(Some("a.md")).launch(dir.path()).unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         assert_eq!(launch.open, Some(root.join("a.md")));
         assert_eq!(launch.root, root);
     }

@@ -1,15 +1,21 @@
 [package]
 name = "markink"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A fast, reliable Markdown note-taking editor"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["markdown", "editor", "notes"]
 categories = ["text-editors"]
+authors = ["Nishant Sharma"]
+repository = "https://github.com/goldenryu2000/MarkInk"
+homepage = "https://github.com/goldenryu2000/MarkInk"
+exclude = ["/.github", "/benches"]
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+dunce = "1.0.5"
 grep-regex = "0.1.14"
 grep-searcher = "0.1.17"
 iced = { version = "0.14", features = ["markdown", "highlighter", "tokio"] }
@@ -17,6 +23,7 @@ ignore = "0.4.33"
 notify = "8.2.0"
 notify-debouncer-full = "0.7.0"
 nucleo-matcher = "0.3.1"
+open = "5.4.4"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tokio = { version = "1.53.1", features = ["rt", "time"] }
@@ -36,3 +43,29 @@ codegen-units = 1
 [[bench]]
 name = "core"
 harness = false
+
+[target."cfg(windows)".build-dependencies]
+winresource = "0.1.31"
+
+[package.metadata.packager]
+product-name = "MarkInk"
+identifier = "io.github.goldenryu2000.markink"
+category = "Productivity"
+publisher = "Nishant Sharma"
+long-description = "Open a folder of Markdown notes and edit them with tabs, a live preview, autosave, quick open and full-text search."
+icons = ["assets/icon.png"]
+out-dir = "dist"
+binaries = [{ path = "markink", main = true }]
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.nsis]
+installer-icon = "assets/icon.ico"
+installer-mode = "currentUser"
+
+[package.metadata.packager.deb]
+package-name = "markink"
+section = "editors"
+desktop-template = "assets/markink.desktop"
+depends = ["libxkbcommon0", "libxkbcommon-x11-0"]

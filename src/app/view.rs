@@ -459,10 +459,10 @@ fn with_hint<'a>(content: impl Into<Element<'a, Message>>, hint: String) -> Elem
 
 /// Two-column list of every shortcut.
 fn shortcut_table<'a>() -> Element<'a, Message> {
-    let rows = shortcuts::HELP.iter().map(|(action, keys)| {
+    let rows = shortcuts::help().into_iter().map(|(action, keys)| {
         row![
-            text(*action).size(UI_TEXT).width(220),
-            text(*keys).size(UI_TEXT).font(Font::MONOSPACE),
+            text(action).size(UI_TEXT).width(220),
+            text(keys).size(UI_TEXT).font(Font::MONOSPACE),
         ]
         .into()
     });

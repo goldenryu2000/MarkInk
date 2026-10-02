@@ -25,7 +25,7 @@ impl QuickOpen {
         let mut paths: Vec<String> = notes
             .iter()
             .filter_map(|p| p.strip_prefix(&self.root).ok())
-            .map(|p| p.to_string_lossy().into_owned())
+            .map(|p| p.to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/"))
             .collect();
         paths.sort_unstable();
         self.paths = paths;
