@@ -26,7 +26,7 @@ jobs:
             arch: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -41,7 +41,7 @@ jobs:
           mkdir -p "$name"
           cp target/release/markink README.md LICENSE-MIT LICENSE-APACHE "$name/"
           tar czf "dist/$name.tar.gz" "$name"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-${{ matrix.arch }}
           path: |
@@ -58,7 +58,7 @@ jobs:
             arch: intel
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -82,7 +82,7 @@ jobs:
           ln -s /Applications stage/Applications
           hdiutil create -volname MarkInk -srcfolder stage -ov -format UDZO \
             "dist/MarkInk-$version-macos-${{ matrix.arch }}.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: dist/*.dmg
@@ -90,7 +90,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
@@ -103,7 +103,7 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           cp target/release/markink.exe "dist/MarkInk-$version-windows-x86_64-portable.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: |
@@ -115,12 +115,12 @@ jobs:
     needs: [linux, macos, windows]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
       - run: cd artifacts && sha256sum * > SHA256SUMS.txt
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           draft: true
           generate_release_notes: true
