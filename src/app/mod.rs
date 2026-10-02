@@ -82,6 +82,8 @@ pub struct State {
     launch_open: Option<PathBuf>,
     help_visible: bool,
     window_height: f32,
+    session_save_in_flight: bool,
+    session_save_pending: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +150,8 @@ impl State {
             launch_open: None,
             help_visible: false,
             window_height: 800.0,
+            session_save_in_flight: false,
+            session_save_pending: false,
         }
     }
 
@@ -241,12 +245,7 @@ impl State {
             Message::FileOpDone(result) => self.file_op_done(result),
             Message::TrashSelected => self.trash_selected(),
             Message::SessionTabsLoaded(restored) => self.session_tabs_loaded(restored),
-            Message::SessionSaved(result) => {
-                if let Err(err) = result {
-                    tracing::warn!(%err, "cannot save session");
-                }
-                Task::none()
-            }
+            Message::SessionSaved(result) => self.session_saved(result),
         }
     }
 

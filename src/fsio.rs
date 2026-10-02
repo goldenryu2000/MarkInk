@@ -5,6 +5,7 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const BOM: &str = "\u{feff}";
 
@@ -204,7 +205,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let name = target
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
-    let tmp = dir.join(format!(".{}.markink-tmp", name.to_string_lossy()));
+    // Unique per write, so concurrent saves of one file never share a temp file.
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(
+        ".{}.{}-{n}.markink-tmp",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
     let permissions = fs::metadata(&target).ok().map(|m| m.permissions());
     let result = (|| -> io::Result<()> {
         let mut file = File::create(&tmp)?;
@@ -427,6 +435,27 @@ mod tests {
         }
         assert!(matches!(result, Err(SaveError::Io(_))));
         assert_eq!(fs::read_to_string(&path).unwrap(), "x");
+    }
+
+    #[test]
+    fn concurrent_writes_never_mix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("s.json");
+        let payloads: Vec<Vec<u8>> = (0..8u8).map(|i| vec![b'a' + i; 64 * 1024]).collect();
+        std::thread::scope(|scope| {
+            for bytes in &payloads {
+                let path = &path;
+                scope.spawn(move || {
+                    for _ in 0..20 {
+                        write_atomic(path, bytes).unwrap();
+                    }
+                });
+            }
+        });
+        let written = fs::read(&path).unwrap();
+        assert!(payloads.contains(&written), "file mixes two writes");
+        let names: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
+        assert_eq!(names.len(), 1, "temp files left behind");
     }
 
     proptest! {

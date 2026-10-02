@@ -810,3 +810,21 @@ fn windows_executables_are_not_opened() {
     std::fs::write(&image, "png").unwrap();
     assert!(super::preview::safe_to_open(&image));
 }
+
+#[test]
+fn session_saves_run_one_at_a_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = state();
+    s.session_path = Some(dir.path().join("session.json"));
+    let _ = s.save_session();
+    assert!(s.session_save_in_flight);
+    let _ = s.save_session();
+    assert!(s.session_save_pending);
+    let _ = s.update(Message::SessionSaved(Ok(())));
+    assert!(
+        !s.session_save_pending && s.session_save_in_flight,
+        "queued save starts"
+    );
+    let _ = s.update(Message::SessionSaved(Ok(())));
+    assert!(!s.session_save_in_flight);
+}
