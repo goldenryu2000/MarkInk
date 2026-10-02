@@ -1,11 +1,12 @@
 //! Layout and widgets.
 
+use std::ops::Range;
 use std::path::Path;
 
 use iced::highlighter;
 use iced::widget::text_editor::{self, Binding, KeyPress};
 use iced::widget::{
-    Column, button, checkbox, column, container, markdown, mouse_area, opaque, row, rule,
+    Column, Space, button, checkbox, column, container, markdown, mouse_area, opaque, row, rule,
     scrollable, space, stack, text, text_input, tooltip,
 };
 use iced::{Center, Color, Element, Fill, Font, Padding, Theme};
@@ -77,11 +78,24 @@ impl State {
         ]
         .spacing(2);
         let selected = self.tree.selected.as_deref();
-        let rows = self
-            .tree
-            .rows()
+        let rows = self.tree.rows();
+        let total = rows.len();
+        let range = visible_range(
+            total,
+            self.sidebar_offset,
+            self.window_height,
+            TREE_ROW_HEIGHT,
+        );
+        let above = range.start as f32 * TREE_ROW_HEIGHT;
+        let below = (total - range.end) as f32 * TREE_ROW_HEIGHT;
+        let visible = rows
             .into_iter()
+            .skip(range.start)
+            .take(range.len())
             .map(|row| tree_row(row, selected));
+        let list = column![Space::new().height(above)]
+            .extend(visible)
+            .push(Space::new().height(below));
         let mut content = column![header].spacing(4).padding(4);
         if let Some(prompt) = &self.prompt {
             let placeholder = match prompt.kind {
@@ -98,7 +112,10 @@ impl State {
                     .padding(4),
             );
         }
-        content = content.push(scrollable(column(rows)).height(Fill));
+        let list = scrollable(list)
+            .on_scroll(|viewport| Message::SidebarScrolled(viewport.absolute_offset().y))
+            .height(Fill);
+        content = content.push(list);
         container(content).width(SIDEBAR_WIDTH).height(Fill).into()
     }
 
@@ -225,6 +242,22 @@ fn status_suffix(doc: &Document) -> &'static str {
     }
 }
 
+/// Sidebar rows have a fixed height so only the visible ones need drawing.
+const TREE_ROW_HEIGHT: f32 = 22.0;
+/// Extra rows drawn above and below the viewport.
+const OVERSCAN: usize = 5;
+
+/// Rows to draw for a list of `total` fixed-height rows scrolled to `offset`.
+pub(super) fn visible_range(total: usize, offset: f32, viewport: f32, row: f32) -> Range<usize> {
+    let visible = (viewport / row).ceil() as usize;
+    let first = (offset.max(0.0) / row).floor() as usize;
+    let end = first.saturating_add(visible + OVERSCAN).min(total);
+    let start = first
+        .saturating_sub(OVERSCAN)
+        .min(end.saturating_sub(visible + 2 * OVERSCAN));
+    start..end
+}
+
 fn tree_row<'a>(row: Row<'a>, selected: Option<&Path>) -> Element<'a, Message> {
     let marker = match (row.entry.kind, row.expanded) {
         (EntryKind::Dir, true) => "▾ ",
@@ -233,9 +266,13 @@ fn tree_row<'a>(row: Row<'a>, selected: Option<&Path>) -> Element<'a, Message> {
     };
     let indent = 6.0 + row.depth as f32 * 14.0;
     let is_selected = selected == Some(row.entry.path.as_path());
-    button(text(format!("{marker}{}", row.entry.name)).size(UI_TEXT))
+    let label = text(format!("{marker}{}", row.entry.name))
+        .size(UI_TEXT)
+        .wrapping(text::Wrapping::None);
+    button(label)
         .on_press(Message::EntryClicked(row.entry.clone()))
         .width(Fill)
+        .height(TREE_ROW_HEIGHT)
         .padding(Padding {
             top: 2.0,
             bottom: 2.0,

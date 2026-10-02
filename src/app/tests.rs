@@ -842,3 +842,22 @@ fn folder_rename_rechecks_notes_inside() {
     assert_eq!(doc(&s, a).path(), Path::new("/notes/other/a.md"));
     assert!(doc(&s, a).recheck_after_save, "moved note is re-checked");
 }
+
+use super::view::visible_range;
+
+#[test]
+fn sidebar_draws_only_visible_rows() {
+    // 20 rows fit in 440px; 5 extra rows above and below.
+    assert_eq!(visible_range(1000, 0.0, 440.0, 22.0), 0..25);
+    assert_eq!(visible_range(1000, 2200.0, 440.0, 22.0), 95..125);
+    assert_eq!(visible_range(1000, 1e9, 440.0, 22.0), 970..1000);
+    assert_eq!(visible_range(5, 0.0, 440.0, 22.0), 0..5);
+    assert_eq!(visible_range(0, 300.0, 440.0, 22.0), 0..0);
+}
+
+#[test]
+fn sidebar_scroll_is_tracked() {
+    let mut s = state();
+    let _ = s.update(Message::SidebarScrolled(330.0));
+    assert_eq!(s.sidebar_offset, 330.0);
+}

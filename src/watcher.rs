@@ -323,6 +323,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
+    fn unreadable_folder_does_not_disable_watching() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let locked = root.join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::create_dir(locked.join("inner")).unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        let (tx, rx) = std_mpsc::channel();
+        let watcher = start(root.clone(), move |c| tx.send(c).unwrap());
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let _watcher = watcher.expect("watching starts despite an unreadable folder");
+        fs::write(root.join("a.md"), "a").unwrap();
+        assert!(collect_until(&rx, &root.join("a.md")).contains(&root.join("a.md")));
+    }
+
+    #[test]
     fn watches_folders_created_later() {
         let dir = tempfile::tempdir().unwrap();
         let root = dunce::canonicalize(dir.path()).unwrap();
