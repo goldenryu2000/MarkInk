@@ -53,7 +53,7 @@ identifier = "io.github.goldenryu2000.markink"
 category = "Productivity"
 publisher = "Nishant Sharma"
 long-description = "Open a folder of Markdown notes and edit them with tabs, a live preview, autosave, quick open and full-text search."
-icons = ["assets/icon.png"]
+icons = ["assets/icon.png", "assets/icon.icns"]
 out-dir = "dist"
 binaries = [{ path = "markink", main = true }]
 

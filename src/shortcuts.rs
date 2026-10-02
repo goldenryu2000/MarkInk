@@ -98,7 +98,7 @@ pub fn editor_key(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Optio
     }
     let ctrl = modifiers.command();
     match key {
-        Key::Named(Named::Tab) if !ctrl => Some(if modifiers.shift() {
+        Key::Named(Named::Tab) if !ctrl && !modifiers.control() => Some(if modifiers.shift() {
             EditorKey::Unindent
         } else {
             EditorKey::Indent
@@ -148,7 +148,19 @@ mod tests {
         Key::Character(c.into())
     }
 
-    const CTRL_SHIFT: Modifiers = Modifiers::CTRL.union(Modifiers::SHIFT);
+    /// The command modifier: Cmd on macOS, Ctrl elsewhere.
+    const CMD: Modifiers = if cfg!(target_os = "macos") {
+        Modifiers::LOGO
+    } else {
+        Modifiers::CTRL
+    };
+    /// The word modifier: Option on macOS, Ctrl elsewhere.
+    const WORD: Modifiers = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
+    const CTRL_SHIFT: Modifiers = CMD.union(Modifiers::SHIFT);
 
     #[test]
     fn maps_ctrl_letters() {
@@ -163,7 +175,7 @@ mod tests {
         ];
         for (c, command) in cases {
             assert_eq!(
-                command_for(&letter(&c.to_string()), Some(c), Modifiers::CTRL),
+                command_for(&letter(&c.to_string()), Some(c), CMD),
                 Some(command)
             );
         }
@@ -188,7 +200,7 @@ mod tests {
     #[test]
     fn uses_latin_letter_on_other_layouts() {
         assert_eq!(
-            command_for(&letter("з"), Some('p'), Modifiers::CTRL),
+            command_for(&letter("з"), Some('p'), CMD),
             Some(Command::QuickOpen)
         );
     }
@@ -200,7 +212,8 @@ mod tests {
             command_for(&tab, None, Modifiers::CTRL),
             Some(Command::NextTab)
         );
-        assert_eq!(command_for(&tab, None, CTRL_SHIFT), Some(Command::PrevTab));
+        let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+        assert_eq!(command_for(&tab, None, ctrl_shift), Some(Command::PrevTab));
         assert_eq!(
             command_for(&Key::Named(Named::F2), None, Modifiers::empty()),
             Some(Command::Rename)
@@ -218,7 +231,7 @@ mod tests {
             None
         );
         assert_eq!(
-            command_for(&letter("p"), Some('p'), Modifiers::CTRL | Modifiers::ALT),
+            command_for(&letter("p"), Some('p'), CMD | Modifiers::ALT),
             None
         );
         assert_eq!(
@@ -230,17 +243,16 @@ mod tests {
     #[test]
     fn maps_editor_keys() {
         let named = |n| Key::Named(n);
-        let ctrl = Modifiers::CTRL;
         assert_eq!(
-            editor_key(&named(Named::Backspace), None, ctrl),
+            editor_key(&named(Named::Backspace), None, WORD),
             Some(EditorKey::DeleteWordBack)
         );
         assert_eq!(
-            editor_key(&named(Named::Delete), None, ctrl),
+            editor_key(&named(Named::Delete), None, WORD),
             Some(EditorKey::DeleteWordForward)
         );
         assert_eq!(
-            editor_key(&letter("l"), Some('l'), ctrl),
+            editor_key(&letter("l"), Some('l'), CMD),
             Some(EditorKey::ToggleTask)
         );
         assert_eq!(
@@ -264,14 +276,10 @@ mod tests {
             editor_key(&named(Named::Backspace), None, Modifiers::empty()),
             None
         );
-        assert_eq!(
-            editor_key(
-                &named(Named::Backspace),
-                None,
-                Modifiers::CTRL | Modifiers::ALT
-            ),
-            None
-        );
+        if !cfg!(target_os = "macos") {
+            let ctrl_alt = Modifiers::CTRL | Modifiers::ALT;
+            assert_eq!(editor_key(&named(Named::Backspace), None, ctrl_alt), None);
+        }
         assert_eq!(
             editor_key(&named(Named::Enter), None, Modifiers::SHIFT),
             None

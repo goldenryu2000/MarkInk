@@ -294,7 +294,12 @@ fn resolves_links() {
     );
     assert_eq!(
         resolve_link(Some(note), "img.png"),
-        Link::External("/notes/work/img.png".into())
+        Link::External(
+            Path::new("/notes/work")
+                .join("img.png")
+                .to_string_lossy()
+                .into()
+        )
     );
     assert_eq!(resolve_link(Some(note), "#heading"), Link::Unsupported);
     assert_eq!(resolve_link(None, "b.md"), Link::Unsupported);
