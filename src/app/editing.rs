@@ -289,6 +289,12 @@ impl State {
                 FsChange::Renamed { from, to } => {
                     self.tabs.rename_path(from, to);
                     self.tree.forget(from);
+                    // Notes inside a renamed folder moved too; re-check them.
+                    for id in self.tabs.under(to) {
+                        if let Some(doc) = self.tabs.get(id) {
+                            touched.insert(doc.path().to_path_buf());
+                        }
+                    }
                 }
                 FsChange::Removed(path) => self.tree.forget(path),
                 FsChange::Created(_) | FsChange::Modified(_) => {}

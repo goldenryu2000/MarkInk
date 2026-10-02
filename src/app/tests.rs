@@ -828,3 +828,17 @@ fn session_saves_run_one_at_a_time() {
     let _ = s.update(Message::SessionSaved(Ok(())));
     assert!(!s.session_save_in_flight);
 }
+
+#[test]
+fn folder_rename_rechecks_notes_inside() {
+    let mut s = state();
+    let a = load(&mut s, "dir/a.md", "x");
+    s.tabs.get_mut(a).unwrap().saving = true;
+    let change = FsChange::Renamed {
+        from: "/notes/dir".into(),
+        to: "/notes/other".into(),
+    };
+    let _ = s.update(Message::FsChanges(vec![change]));
+    assert_eq!(doc(&s, a).path(), Path::new("/notes/other/a.md"));
+    assert!(doc(&s, a).recheck_after_save, "moved note is re-checked");
+}
