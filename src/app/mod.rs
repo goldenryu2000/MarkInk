@@ -29,6 +29,11 @@ use palette::{Palette, SearchEvent, build_index};
 use session::RestoredTabs;
 
 const EDITOR_ID: &str = "editor";
+const PREVIEW_ID: &str = "preview";
+/// Editor line height in pixels (15px text, iced's default 1.3 line height).
+const EDITOR_LINE_HEIGHT: f32 = 15.0 * 1.3;
+/// Vertical space taken by the tab bar and editor padding.
+const EDITOR_CHROME: f32 = 60.0;
 
 pub fn run(launch: Launch) -> iced::Result {
     iced::application(
@@ -61,6 +66,7 @@ pub struct State {
     session_path: Option<PathBuf>,
     launch_open: Option<PathBuf>,
     help_visible: bool,
+    window_height: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +132,7 @@ impl State {
             session_path: None,
             launch_open: None,
             help_visible: false,
+            window_height: 800.0,
         }
     }
 
@@ -305,6 +312,11 @@ impl State {
             theme::Mode::Light => Theme::Light,
             _ => Theme::Dark,
         }
+    }
+
+    /// Editor lines that fit on screen.
+    fn visible_lines(&self) -> f32 {
+        ((self.window_height - EDITOR_CHROME) / EDITOR_LINE_HEIGHT).max(1.0)
     }
 
     /// `path` relative to the workspace root, for display.

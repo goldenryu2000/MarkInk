@@ -756,3 +756,37 @@ fn help_toggles_and_escape_closes_it() {
     let _ = s.update(Message::Shortcut(Command::Escape));
     assert!(!s.help_visible);
 }
+
+use iced::widget::text_editor::Motion;
+
+#[test]
+fn editor_scrolling_moves_the_view_estimate() {
+    let mut s = state();
+    let a = load(&mut s, "a.md", &"x\n".repeat(200));
+    let _ = s.update(Message::Edit(a, Action::Scroll { lines: 50 }));
+    assert_eq!(doc(&s, a).view.top(), 50.0);
+    let _ = s.update(Message::Edit(a, Action::Move(Motion::DocumentEnd)));
+    assert!(doc(&s, a).view.top() > 150.0);
+}
+
+#[test]
+fn window_height_sets_visible_lines() {
+    let mut s = state();
+    let tall = s.visible_lines();
+    let _ = s.update(Message::Window(window::Event::Resized(iced::Size::new(
+        800.0, 400.0,
+    ))));
+    assert!(s.visible_lines() < tall);
+}
+
+#[test]
+fn opened_window_size_sets_visible_lines() {
+    let mut s = state();
+    let tall = s.visible_lines();
+    let opened = window::Event::Opened {
+        position: None,
+        size: iced::Size::new(800.0, 400.0),
+    };
+    let _ = s.update(Message::Window(opened));
+    assert!(s.visible_lines() < tall);
+}

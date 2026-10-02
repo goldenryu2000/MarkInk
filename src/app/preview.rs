@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use iced::Task;
+use iced::widget::operation;
+use iced::widget::scrollable::RelativeOffset;
 
-use super::{Message, State, delayed};
+use super::{Message, PREVIEW_ID, State, delayed};
 use crate::autosave::PREVIEW_DELAY;
 use crate::document::{DocId, LARGE_NOTE_BYTES};
 use crate::workspace;
@@ -68,8 +70,9 @@ impl State {
             return Task::none();
         }
         doc.preview_visible = !doc.preview_visible;
+        let id = doc.id();
         self.refresh_active_preview();
-        Task::none()
+        self.sync_preview(id)
     }
 
     pub(super) fn schedule_preview(&self, id: DocId) -> Task<Message> {
@@ -91,6 +94,23 @@ impl State {
             doc.refresh_preview();
         }
         Task::none()
+    }
+
+    /// Scrolls the preview to match the editor's estimated position.
+    pub(super) fn sync_preview(&self, id: DocId) -> Task<Message> {
+        match self.tabs.active() {
+            Some(doc) if doc.id() == id && doc.preview_visible => {
+                let y = doc.view.fraction(doc.line_count(), self.visible_lines());
+                operation::snap_to(
+                    PREVIEW_ID,
+                    RelativeOffset {
+                        x: None,
+                        y: Some(y),
+                    },
+                )
+            }
+            _ => Task::none(),
+        }
     }
 
     /// Parses the active note's preview if it is shown and out of date.

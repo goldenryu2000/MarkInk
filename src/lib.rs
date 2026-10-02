@@ -9,6 +9,7 @@ pub mod lists;
 pub mod logging;
 pub mod paths;
 pub mod quick_open;
+pub mod scroll_sync;
 pub mod search;
 pub mod session;
 pub mod shortcuts;

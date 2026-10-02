@@ -72,7 +72,11 @@ impl State {
             return Task::none();
         }
         self.refresh_active_preview();
-        Task::batch([self.flush_previous(previous), focus_editor()])
+        Task::batch([
+            self.flush_previous(previous),
+            focus_editor(),
+            self.sync_preview(id),
+        ])
     }
 
     pub(super) fn cycle_tab(&mut self, forward: bool) -> Task<Message> {
@@ -103,14 +107,29 @@ impl State {
     }
 
     pub(super) fn edit(&mut self, id: DocId, action: text_editor::Action) -> Task<Message> {
-        let changed = self
-            .tabs
-            .get_mut(id)
-            .is_some_and(|doc| doc.apply(action, Instant::now()));
+        let Some(doc) = self.tabs.get_mut(id) else {
+            return Task::none();
+        };
+        if let text_editor::Action::Scroll { lines } = action {
+            doc.view.scrolled(lines as f32, doc.line_count());
+            doc.apply(action, Instant::now());
+            return self.sync_preview(id);
+        }
+        let changed = doc.apply(action, Instant::now());
+        self.after_move(id, changed)
+    }
+
+    /// Keeps the cursor in the estimated view, syncs the preview and, if the text changed, restarts timers.
+    fn after_move(&mut self, id: DocId, changed: bool) -> Task<Message> {
+        let visible = self.visible_lines();
+        if let Some(doc) = self.tabs.get_mut(id) {
+            doc.view.follow_cursor(doc.cursor().0, visible);
+        }
+        let sync = self.sync_preview(id);
         if changed {
-            self.after_change(id)
+            Task::batch([self.after_change(id), sync])
         } else {
-            Task::none()
+            sync
         }
     }
 
@@ -131,11 +150,7 @@ impl State {
             }
             EditorKey::ToggleTask => doc.toggle_task(now),
         };
-        if changed {
-            self.after_change(id)
-        } else {
-            Task::none()
-        }
+        self.after_move(id, changed)
     }
 
     /// Undo (`true`) or redo in the active note.
@@ -145,11 +160,7 @@ impl State {
         };
         let id = doc.id();
         let changed = if undo { doc.undo() } else { doc.redo() };
-        if changed {
-            self.after_change(id)
-        } else {
-            Task::none()
-        }
+        self.after_move(id, changed)
     }
 
     /// Timers to restart after a note's text changed.
@@ -383,6 +394,10 @@ impl State {
     pub(super) fn window_event(&mut self, event: window::Event) -> Task<Message> {
         match event {
             window::Event::Unfocused => self.flush_all(),
+            window::Event::Resized(size) | window::Event::Opened { size, .. } => {
+                self.window_height = size.height;
+                Task::none()
+            }
             window::Event::CloseRequested => {
                 self.quitting = true;
                 let flush = self.flush_all();

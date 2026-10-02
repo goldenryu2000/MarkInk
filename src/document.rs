@@ -10,6 +10,7 @@ use iced::widget::text_editor::{Action, Content, Cursor, Edit, Motion, Position}
 
 use crate::fsio::{self, DiskSnapshot, Expect, LoadedNote, SaveError, TextFormat};
 use crate::lists::{self, OnEnter};
+use crate::scroll_sync::ViewEstimate;
 use crate::undo::{Change, EditKind, UndoStack};
 
 /// Notes larger than this open with the preview disabled.
@@ -68,6 +69,8 @@ pub struct Document {
     /// Close the tab once pending edits are saved.
     pub close_requested: bool,
     pub preview_visible: bool,
+    /// Estimated scroll position, used to sync the preview.
+    pub view: ViewEstimate,
 }
 
 impl Document {
@@ -90,6 +93,7 @@ impl Document {
             recheck_after_save: false,
             close_requested: false,
             preview_visible: false,
+            view: ViewEstimate::default(),
         }
     }
 
@@ -118,6 +122,10 @@ impl Document {
 
     pub fn content(&self) -> &Content {
         &self.content
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.content.line_count()
     }
 
     pub fn revision(&self) -> u64 {
