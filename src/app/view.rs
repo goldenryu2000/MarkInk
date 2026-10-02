@@ -13,7 +13,7 @@ use iced::{Center, Color, Element, Fill, Font, Padding, Theme};
 use super::explorer::{PROMPT_INPUT_ID, PromptKind};
 use super::palette::SearchPalette;
 use super::palette::{PALETTE_INPUT_ID, Palette};
-use super::{EDITOR_ID, Message, State};
+use super::{EDITOR_ID, Message, PREVIEW_ID, State};
 use crate::document::{DocId, DocStatus, Document};
 use crate::search::MAX_HITS;
 use crate::shortcuts::{self, Command};
@@ -151,6 +151,7 @@ impl State {
         let preview = markdown::view(doc.preview_items(), markdown::Settings::from(&theme))
             .map(Message::LinkClicked);
         let preview = scrollable(container(preview).padding(16).width(Fill))
+            .id(PREVIEW_ID)
             .width(Fill)
             .height(Fill);
         row![editor, rule::vertical(1), preview].height(Fill).into()
@@ -458,10 +459,10 @@ fn with_hint<'a>(content: impl Into<Element<'a, Message>>, hint: String) -> Elem
 
 /// Two-column list of every shortcut.
 fn shortcut_table<'a>() -> Element<'a, Message> {
-    let rows = shortcuts::HELP.iter().map(|(action, keys)| {
+    let rows = shortcuts::help().into_iter().map(|(action, keys)| {
         row![
-            text(*action).size(UI_TEXT).width(220),
-            text(*keys).size(UI_TEXT).font(Font::MONOSPACE),
+            text(action).size(UI_TEXT).width(220),
+            text(keys).size(UI_TEXT).font(Font::MONOSPACE),
         ]
         .into()
     });

@@ -42,10 +42,25 @@ pub const HELP: &[(&str, &str)] = &[
     ("Shortcuts", "F1"),
 ];
 
+/// `HELP` with keys as written on this platform: Cmd and Option on macOS.
+pub fn help() -> Vec<(&'static str, String)> {
+    HELP.iter().map(|(a, k)| (*a, platform_keys(k))).collect()
+}
+
+fn platform_keys(keys: &str) -> String {
+    if !cfg!(target_os = "macos") || keys.starts_with("Ctrl+Tab") {
+        return keys.to_owned();
+    }
+    if keys.contains("Backspace") || keys.contains("Left") {
+        return keys.replace("Ctrl+", "Option+");
+    }
+    keys.replace("Ctrl+", "Cmd+")
+}
+
 /// Display hint for a command, e.g. `"New note (Ctrl+N)"`.
 pub fn hint(action: &str) -> String {
     match HELP.iter().find(|(a, _)| *a == action) {
-        Some((_, keys)) => format!("{action} ({keys})"),
+        Some((_, keys)) => format!("{action} ({})", platform_keys(keys)),
         None => action.to_owned(),
     }
 }
@@ -71,14 +86,19 @@ pub enum EditorKey {
 
 /// Maps a key press in the focused editor to an editing action.
 pub fn editor_key(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Option<EditorKey> {
+    // Word jumps use Ctrl, or Option on macOS.
+    let word = modifiers.jump() && (cfg!(target_os = "macos") || !modifiers.alt());
+    match key {
+        Key::Named(Named::Backspace) if word => return Some(EditorKey::DeleteWordBack),
+        Key::Named(Named::Delete) if word => return Some(EditorKey::DeleteWordForward),
+        _ => {}
+    }
     if modifiers.alt() {
         return None;
     }
     let ctrl = modifiers.command();
     match key {
-        Key::Named(Named::Backspace) if ctrl => Some(EditorKey::DeleteWordBack),
-        Key::Named(Named::Delete) if ctrl => Some(EditorKey::DeleteWordForward),
-        Key::Named(Named::Tab) if !ctrl => Some(if modifiers.shift() {
+        Key::Named(Named::Tab) if !ctrl && !modifiers.control() => Some(if modifiers.shift() {
             EditorKey::Unindent
         } else {
             EditorKey::Indent
@@ -92,9 +112,11 @@ pub fn editor_key(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Optio
 /// Maps a key press to a command. `latin` is the layout-independent letter.
 pub fn command_for(key: &Key, latin: Option<char>, modifiers: Modifiers) -> Option<Command> {
     if let Key::Named(named) = key {
+        // Tabs cycle with Ctrl on every platform; Cmd+Tab is the macOS app switcher.
+        let tab_modifier = modifiers.control();
         return match (named, modifiers.command(), modifiers.shift()) {
-            (Named::Tab, true, false) => Some(Command::NextTab),
-            (Named::Tab, true, true) => Some(Command::PrevTab),
+            (Named::Tab, _, false) if tab_modifier => Some(Command::NextTab),
+            (Named::Tab, _, true) if tab_modifier => Some(Command::PrevTab),
             (Named::F2, false, _) => Some(Command::Rename),
             (Named::F1, false, _) => Some(Command::Help),
             (Named::Escape, false, _) => Some(Command::Escape),
@@ -126,7 +148,19 @@ mod tests {
         Key::Character(c.into())
     }
 
-    const CTRL_SHIFT: Modifiers = Modifiers::CTRL.union(Modifiers::SHIFT);
+    /// The command modifier: Cmd on macOS, Ctrl elsewhere.
+    const CMD: Modifiers = if cfg!(target_os = "macos") {
+        Modifiers::LOGO
+    } else {
+        Modifiers::CTRL
+    };
+    /// The word modifier: Option on macOS, Ctrl elsewhere.
+    const WORD: Modifiers = if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    };
+    const CTRL_SHIFT: Modifiers = CMD.union(Modifiers::SHIFT);
 
     #[test]
     fn maps_ctrl_letters() {
@@ -141,7 +175,7 @@ mod tests {
         ];
         for (c, command) in cases {
             assert_eq!(
-                command_for(&letter(&c.to_string()), Some(c), Modifiers::CTRL),
+                command_for(&letter(&c.to_string()), Some(c), CMD),
                 Some(command)
             );
         }
@@ -166,7 +200,7 @@ mod tests {
     #[test]
     fn uses_latin_letter_on_other_layouts() {
         assert_eq!(
-            command_for(&letter("з"), Some('p'), Modifiers::CTRL),
+            command_for(&letter("з"), Some('p'), CMD),
             Some(Command::QuickOpen)
         );
     }
@@ -178,7 +212,8 @@ mod tests {
             command_for(&tab, None, Modifiers::CTRL),
             Some(Command::NextTab)
         );
-        assert_eq!(command_for(&tab, None, CTRL_SHIFT), Some(Command::PrevTab));
+        let ctrl_shift = Modifiers::CTRL | Modifiers::SHIFT;
+        assert_eq!(command_for(&tab, None, ctrl_shift), Some(Command::PrevTab));
         assert_eq!(
             command_for(&Key::Named(Named::F2), None, Modifiers::empty()),
             Some(Command::Rename)
@@ -196,7 +231,7 @@ mod tests {
             None
         );
         assert_eq!(
-            command_for(&letter("p"), Some('p'), Modifiers::CTRL | Modifiers::ALT),
+            command_for(&letter("p"), Some('p'), CMD | Modifiers::ALT),
             None
         );
         assert_eq!(
@@ -208,17 +243,16 @@ mod tests {
     #[test]
     fn maps_editor_keys() {
         let named = |n| Key::Named(n);
-        let ctrl = Modifiers::CTRL;
         assert_eq!(
-            editor_key(&named(Named::Backspace), None, ctrl),
+            editor_key(&named(Named::Backspace), None, WORD),
             Some(EditorKey::DeleteWordBack)
         );
         assert_eq!(
-            editor_key(&named(Named::Delete), None, ctrl),
+            editor_key(&named(Named::Delete), None, WORD),
             Some(EditorKey::DeleteWordForward)
         );
         assert_eq!(
-            editor_key(&letter("l"), Some('l'), ctrl),
+            editor_key(&letter("l"), Some('l'), CMD),
             Some(EditorKey::ToggleTask)
         );
         assert_eq!(
@@ -242,14 +276,10 @@ mod tests {
             editor_key(&named(Named::Backspace), None, Modifiers::empty()),
             None
         );
-        assert_eq!(
-            editor_key(
-                &named(Named::Backspace),
-                None,
-                Modifiers::CTRL | Modifiers::ALT
-            ),
-            None
-        );
+        if !cfg!(target_os = "macos") {
+            let ctrl_alt = Modifiers::CTRL | Modifiers::ALT;
+            assert_eq!(editor_key(&named(Named::Backspace), None, ctrl_alt), None);
+        }
         assert_eq!(
             editor_key(&named(Named::Enter), None, Modifiers::SHIFT),
             None
@@ -278,6 +308,44 @@ mod tests {
             let row = format!("| {action} | {keys} |");
             assert!(readme.contains(&row), "README is missing: {row}");
         }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn help_uses_reference_keys() {
+        let expected: Vec<_> = HELP.iter().map(|(a, k)| (*a, k.to_string())).collect();
+        assert_eq!(help(), expected);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_help_shows_cmd_and_option() {
+        let help = help();
+        assert!(help.contains(&("Quick open", "Cmd+P".to_string())));
+        assert!(help.contains(&(
+            "Delete word",
+            "Option+Backspace / Option+Delete".to_string()
+        )));
+        assert!(help.contains(&(
+            "Next / previous tab",
+            "Ctrl+Tab / Ctrl+Shift+Tab".to_string()
+        )));
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn mac_uses_option_for_words_and_ctrl_for_tabs() {
+        let backspace = Key::Named(Named::Backspace);
+        assert_eq!(
+            editor_key(&backspace, None, Modifiers::ALT),
+            Some(EditorKey::DeleteWordBack)
+        );
+        let tab = Key::Named(Named::Tab);
+        assert_eq!(
+            command_for(&tab, None, Modifiers::CTRL),
+            Some(Command::NextTab)
+        );
+        assert_eq!(command_for(&tab, None, Modifiers::LOGO), None);
     }
 
     #[test]

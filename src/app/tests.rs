@@ -294,7 +294,12 @@ fn resolves_links() {
     );
     assert_eq!(
         resolve_link(Some(note), "img.png"),
-        Link::External("/notes/work/img.png".into())
+        Link::External(
+            Path::new("/notes/work")
+                .join("img.png")
+                .to_string_lossy()
+                .into()
+        )
     );
     assert_eq!(resolve_link(Some(note), "#heading"), Link::Unsupported);
     assert_eq!(resolve_link(None, "b.md"), Link::Unsupported);
@@ -719,6 +724,7 @@ fn links_only_open_safe_targets() {
 }
 
 #[test]
+#[cfg(unix)]
 fn executable_local_files_are_not_opened() {
     use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
@@ -755,4 +761,52 @@ fn help_toggles_and_escape_closes_it() {
     let _ = s.update(Message::Shortcut(Command::Help));
     let _ = s.update(Message::Shortcut(Command::Escape));
     assert!(!s.help_visible);
+}
+
+use iced::widget::text_editor::Motion;
+
+#[test]
+fn editor_scrolling_moves_the_view_estimate() {
+    let mut s = state();
+    let a = load(&mut s, "a.md", &"x\n".repeat(200));
+    let _ = s.update(Message::Edit(a, Action::Scroll { lines: 50 }));
+    assert_eq!(doc(&s, a).view.top(), 50.0);
+    let _ = s.update(Message::Edit(a, Action::Move(Motion::DocumentEnd)));
+    assert!(doc(&s, a).view.top() > 150.0);
+}
+
+#[test]
+fn window_height_sets_visible_lines() {
+    let mut s = state();
+    let tall = s.visible_lines();
+    let _ = s.update(Message::Window(window::Event::Resized(iced::Size::new(
+        800.0, 400.0,
+    ))));
+    assert!(s.visible_lines() < tall);
+}
+
+#[test]
+fn opened_window_size_sets_visible_lines() {
+    let mut s = state();
+    let tall = s.visible_lines();
+    let opened = window::Event::Opened {
+        position: None,
+        size: iced::Size::new(800.0, 400.0),
+    };
+    let _ = s.update(Message::Window(opened));
+    assert!(s.visible_lines() < tall);
+}
+
+#[test]
+#[cfg(windows)]
+fn windows_executables_are_not_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["run.exe", "run.BAT", "x.ps1", "s.lnk"] {
+        let path = dir.path().join(name);
+        std::fs::write(&path, "x").unwrap();
+        assert!(!super::preview::safe_to_open(&path), "{name}");
+    }
+    let image = dir.path().join("pic.png");
+    std::fs::write(&image, "png").unwrap();
+    assert!(super::preview::safe_to_open(&image));
 }

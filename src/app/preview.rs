@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use iced::Task;
+use iced::widget::operation;
+use iced::widget::scrollable::RelativeOffset;
 
-use super::{Message, State, delayed};
+use super::{Message, PREVIEW_ID, State, delayed};
 use crate::autosave::PREVIEW_DELAY;
 use crate::document::{DocId, LARGE_NOTE_BYTES};
 use crate::workspace;
@@ -68,8 +70,9 @@ impl State {
             return Task::none();
         }
         doc.preview_visible = !doc.preview_visible;
+        let id = doc.id();
         self.refresh_active_preview();
-        Task::none()
+        self.sync_preview(id)
     }
 
     pub(super) fn schedule_preview(&self, id: DocId) -> Task<Message> {
@@ -91,6 +94,23 @@ impl State {
             doc.refresh_preview();
         }
         Task::none()
+    }
+
+    /// Scrolls the preview to match the editor's estimated position.
+    pub(super) fn sync_preview(&self, id: DocId) -> Task<Message> {
+        match self.tabs.active() {
+            Some(doc) if doc.id() == id && doc.preview_visible => {
+                let y = doc.view.fraction(doc.line_count(), self.visible_lines());
+                operation::snap_to(
+                    PREVIEW_ID,
+                    RelativeOffset {
+                        x: None,
+                        y: Some(y),
+                    },
+                )
+            }
+            _ => Task::none(),
+        }
     }
 
     /// Parses the active note's preview if it is shown and out of date.
@@ -115,11 +135,9 @@ impl State {
                 Task::none()
             }
             Link::External(target) => {
-                std::thread::spawn(move || {
-                    if let Err(err) = std::process::Command::new("xdg-open").arg(&target).status() {
-                        tracing::warn!(%err, %target, "cannot open link");
-                    }
-                });
+                if let Err(err) = open::that_detached(&target) {
+                    tracing::warn!(%err, %target, "cannot open link");
+                }
                 Task::none()
             }
             Link::Unsupported => Task::none(),
@@ -127,12 +145,29 @@ impl State {
     }
 }
 
-/// Local files we hand to `xdg-open`: never executables or desktop entries.
+/// Local files we hand to the system opener: never executables or launchers.
 pub fn safe_to_open(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    let is_desktop_entry = path
+    const BLOCKED: &[&str] = &[
+        "desktop", "exe", "bat", "cmd", "com", "msi", "ps1", "lnk", "scr", "vbs", "js", "jar",
+        "app", "command",
+    ];
+    let blocked = path
         .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("desktop"));
-    !is_desktop_entry
-        && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 == 0)
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| BLOCKED.iter().any(|b| e.eq_ignore_ascii_case(b)));
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    !blocked && meta.is_file() && !is_executable(&meta)
+}
+
+#[cfg(unix)]
+fn is_executable(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn is_executable(_meta: &std::fs::Metadata) -> bool {
+    false
 }

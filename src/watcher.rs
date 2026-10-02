@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn reports_real_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let (tx, rx) = std_mpsc::channel();
         let _handle = start(root.clone(), move |c| tx.send(c).unwrap()).unwrap();
         fs::write(root.join("a.md"), "x").unwrap();
