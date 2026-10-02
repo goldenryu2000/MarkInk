@@ -29,6 +29,16 @@ fn benches(c: &mut Criterion) {
         b.iter(|| markdown::Content::parse(black_box(&text)))
     });
 
+    let content = markdown::Content::parse(&text);
+    let theme = iced::Theme::Dark;
+    c.bench_function("preview widgets 100KB", |b| {
+        b.iter(|| {
+            let element: iced::Element<'_, markdown::Uri> =
+                markdown::view(content.items(), markdown::Settings::from(&theme));
+            black_box(element);
+        })
+    });
+
     let mut doc = Document::new(
         DocId(0),
         PathBuf::from("/n/a.md"),
